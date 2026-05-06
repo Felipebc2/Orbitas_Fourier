@@ -3,30 +3,77 @@ Biblioteca para simulação de órbitas planetárias usando Série de Fourier
 """
 import numpy as np
 import matplotlib.pyplot as plt
+from astropy.coordinates import get_body_barycentric_posvel, solar_system_ephemeris
+from astropy.time import Time
+from astropy import units as u
+from astropy import constants as const
 
 
-# Parâmetros dos planetas
-# Fonte: TCC - Tabela 1
-PLANET_DATA = {
-    'Marte': {
-        'semi_major': 1.524,
-        'ecc': 0.0934,
-        'period': 686.98,  # em dias
-        'color': 'red'
-    },
-    'Vênus': {
-        'semi_major': 0.723,
-        'ecc': 0.0068,
-        'period': 224.7,  # em dias
-        'color': 'orange'
-    },
-    'Mercúrio': {
-        'semi_major': 0.387,
-        'ecc': 0.2056,
-        'period': 87.97,  # em dias
-        'color': 'gray'
-    }
+_PLANET_NAMES = {
+    'Mercúrio': 'mercury',
+    'Vênus':    'venus',
+    'Marte':    'mars',
+    'Júpiter':  'jupiter',
+    'Saturno':  'saturn',
+    'Urano':    'uranus',
+    'Netuno':   'neptune',
 }
+
+_PLANET_COLORS = {
+    'Mercúrio': 'gray',
+    'Vênus':    'orange',
+    'Marte':    'red',
+    'Júpiter':  'peru',
+    'Saturno':  'goldenrod',
+    'Urano':    'lightblue',
+    'Netuno':   'royalblue',
+}
+
+
+def _orbital_elements(body: str, epoch: Time) -> tuple:
+    """Calcula (semi-eixo maior em UA, excentricidade, período em dias) a partir
+    dos vetores de estado baricêntricos fornecidos pelo Astropy."""
+    with solar_system_ephemeris.set('builtin'):
+        pos, vel = get_body_barycentric_posvel(body, epoch)
+
+    r_vec = pos.xyz.to(u.m).value
+    v_vec = vel.xyz.to(u.m / u.s).value
+
+    mu = (const.G * const.M_sun).to(u.m**3 / u.s**2).value
+
+    r = np.linalg.norm(r_vec)
+    v = np.linalg.norm(v_vec)
+
+    # Semi-eixo maior via energia específica: ε = v²/2 − μ/r → a = −μ/(2ε)
+    a_m = -mu / (v**2 - 2 * mu / r)
+    a_au = (a_m * u.m).to(u.au).value
+
+    # Excentricidade via vetor de Laplace-Runge-Lenz
+    h_vec = np.cross(r_vec, v_vec)
+    e_vec = np.cross(v_vec, h_vec) / mu - r_vec / r
+    ecc = np.linalg.norm(e_vec)
+
+    # Período via 3ª lei de Kepler: T = 2π√(a³/μ)
+    period_days = (2 * np.pi * np.sqrt(a_m**3 / mu) * u.s).to(u.day).value
+
+    return a_au, ecc, period_days
+
+
+def _build_planet_data() -> dict:
+    epoch = Time('J2000')
+    data = {}
+    for pt_name, body in _PLANET_NAMES.items():
+        a, ecc, period = _orbital_elements(body, epoch)
+        data[pt_name] = {
+            'semi_major': a,
+            'ecc': ecc,
+            'period': period,
+            'color': _PLANET_COLORS[pt_name],
+        }
+    return data
+
+
+PLANET_DATA = _build_planet_data()
 
 
 def calculate_real_orbit(semi_major, ecc, num_points=1000):
